@@ -33,6 +33,7 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"s3.prefix.ph": "默认 dsh-plugin-list-sync",
 		"s3.forcePathStyle": "Path-Style 寻址（MinIO/RustFS 需要）",
 		"s3.allowInsecure": "允许明文 HTTP（不安全）",
+		"s3.serverSideEncryption": "请求 SSE-S3 AES256 加密（RustFS 未配置主密钥时请关闭）",
 		"cred.title": "S3 凭据（AccessKey / SecretKey）",
 		"cred.accessKey": "AccessKey ID",
 		"cred.secretKey": "Secret Access Key",
@@ -91,6 +92,7 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"s3.prefix.ph": "default dsh-plugin-list-sync",
 		"s3.forcePathStyle": "Path-style addressing (MinIO/RustFS)",
 		"s3.allowInsecure": "Allow plain HTTP (insecure)",
+		"s3.serverSideEncryption": "Request SSE-S3 AES256 encryption (disable when RustFS has no master key)",
 		"cred.title": "S3 credentials (AccessKey / SecretKey)",
 		"cred.accessKey": "AccessKey ID",
 		"cred.secretKey": "Secret Access Key",
@@ -205,7 +207,7 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		const state = {
 			form: Object.assign({
 				endpoint: "", region: "auto", bucket: "", prefix: "dsh-plugin-list-sync",
-				forcePathStyle: true, allowInsecure: false,
+				forcePathStyle: true, allowInsecure: false, serverSideEncryption: false,
 				includePatchConfig: false, machineLabel: "",
 			}, loadStoredForm()),
 			status: null, plan: null, busy: false, message: null, error: null, snapshots: [],
@@ -226,6 +228,7 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 				s3: {
 					endpoint: f.endpoint, region: f.region, bucket: f.bucket, prefix: f.prefix,
 					forcePathStyle: f.forcePathStyle, allowInsecure: f.allowInsecure,
+					serverSideEncryption: f.serverSideEncryption === true,
 				},
 				includePatchConfig: f.includePatchConfig,
 				machineLabel: f.machineLabel,
@@ -334,6 +337,8 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 					h("input", { type: "checkbox", checked: form.forcePathStyle, onChange: (e) => setForm({ forcePathStyle: e.target.checked }) })),
 				h(Field, { label: t("s3.allowInsecure") },
 					h("input", { type: "checkbox", checked: form.allowInsecure, onChange: (e) => setForm({ allowInsecure: e.target.checked }) })),
+				h(Field, { label: t("s3.serverSideEncryption") },
+					h("input", { type: "checkbox", checked: form.serverSideEncryption === true, onChange: (e) => setForm({ serverSideEncryption: e.target.checked }) })),
 
 				// credentials block
 				h("div", { style: { margin: "12px 0 4px", padding: "10px", borderRadius: 8, border: "1px solid var(--dsh-border, #8884)" } },
