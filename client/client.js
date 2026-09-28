@@ -191,18 +191,50 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 
 		/** ---------- state ---------- */
 
+		const FORM_STORAGE_KEY = "dsh-plugin-list-sync.form";
+
+		function loadStoredForm() {
+			try {
+				const raw = localStorage.getItem(FORM_STORAGE_KEY);
+				if (raw === null) return {};
+				const parsed = JSON.parse(raw);
+				return parsed !== null && typeof parsed === "object" ? parsed : {};
+			} catch { return {}; }
+		}
+
 		const state = {
-			form: {
+			form: Object.assign({
 				endpoint: "", region: "auto", bucket: "", prefix: "dsh-plugin-list-sync",
 				forcePathStyle: true, allowInsecure: false,
 				includePatchConfig: false, machineLabel: "",
-			},
+			}, loadStoredForm()),
 			status: null, plan: null, busy: false, message: null, error: null, snapshots: [],
 			credentials: { source: null, accessKeyIdMasked: undefined },
 			cred: { accessKeyId: "", secretAccessKey: "" },
 		};
 
-		function setForm(patch) { Object.assign(state.form, patch); render(); }
+		function setForm(patch) {
+			Object.assign(state.form, patch);
+			try { localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(state.form)); } catch { /* private mode */ }
+			render();
+		}
+
+		/** The exact payload the host's mergedConfig expects: s3 block nested. */
+		function s3Payload() {
+			const f = state.form;
+			return {
+				s3: {
+					endpoint: f.endpoint, region: f.region, bucket: f.bucket, prefix: f.prefix,
+					forcePathStyle: f.forcePathStyle, allowInsecure: f.allowInsecure,
+				},
+				includePatchConfig: f.includePatchConfig,
+				machineLabel: f.machineLabel,
+			};
+		}
+
+		function formConfigured() {
+			return state.form.endpoint.trim() !== "" && state.form.bucket.trim() !== "";
+		}
 		/** Controlled-input setter for the credentials fields: mutate + re-render,
 		 *  exactly like setForm — without the render() call React snaps the value
 		 *  back on every keystroke and the field looks untypeable/unpasteable. */
@@ -272,20 +304,22 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 
 		function Panel() {
 			const form = state.form;
+			const statusContent = state.status === null
+				? "…"
+				: (state.status.configured || formConfigured())
+					? [
+						h("span", { key: "p" }, fmt(t, "status.packages", { n: state.status?.local?.packages ?? "?" }), " · "),
+						h("span", { key: "s" }, fmt(t, "status.snapshots", { n: state.status?.snapshots?.length ?? 0 })),
+					]
+					: h("span", null, t("status.notConfigured"));
 			return h("div", { style: { padding: "4px 0", fontSize: 13, lineHeight: 1.5 } },
 				h("h3", { style: { margin: "0 0 4px" } }, t("title")),
 				h("p", { style: { opacity: 0.75, marginTop: 0 } }, t("desc")),
 
-				// status line
+				// status line — local form values count before loader config persists.
 				h("div", { style: { margin: "8px 0", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--dsh-border, #8884)" } },
 					h("strong", null, t("status.title"), " · "),
-					state.status === null ? "…" : (state.status.configured
-						? [
-							h("span", { key: "p" }, fmt(t, "status.packages", { n: state.status.local.packages }), " · "),
-							h("span", { key: "s" }, fmt(t, "status.snapshots", { n: state.status.snapshots.length })),
-						]
-						: h("span", null, t("status.notConfigured"))),
-				),
+					statusContent),
 
 				// S3 connection form
 				h(Field, { label: t("s3.endpoint") },
@@ -361,21 +395,24 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		}
 
 		async function doUpload() {
-			const data = await call("/dsh-plugin-list-sync/api/upload", { config: state.form });
+			if (!formConfigured()) { setError("config", ""); render(); return; }
+			const data = await call("/dsh-plugin-list-sync/api/upload", { config: s3Payload() });
 			if (data === null) return;
 			setMessage(fmt(t, "msg.uploaded", { revision: data.revision, packages: data.packages, bytes: data.bytes }));
 			refreshStatus();
 		}
 
 		async function doPreview() {
-			const data = await call("/dsh-plugin-list-sync/api/preview", { config: state.form });
+			if (!formConfigured()) { setError("config", ""); render(); return; }
+			const data = await call("/dsh-plugin-list-sync/api/preview", { config: s3Payload() });
 			if (data === null) return;
 			state.plan = data.plan; render();
 			refreshStatus();
 		}
 
 		async function doApply() {
-			const data = await call("/dsh-plugin-list-sync/api/apply", { config: state.form });
+			if (!formConfigured()) { setError("config", ""); render(); return; }
+			const data = await call("/dsh-plugin-list-sync/api/apply", { config: s3Payload() });
 			if (data === null) return;
 			state.plan = data.plan ?? state.plan;
 			setMessage(data.applied ? fmt(t, "msg.applied", { snapshot: data.snapshotId }) : t("msg.appliedNoop"));
