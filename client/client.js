@@ -203,6 +203,10 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		};
 
 		function setForm(patch) { Object.assign(state.form, patch); render(); }
+		/** Controlled-input setter for the credentials fields: mutate + re-render,
+		 *  exactly like setForm — without the render() call React snaps the value
+		 *  back on every keystroke and the field looks untypeable/unpasteable. */
+		function setCred(patch) { Object.assign(state.cred, patch); render(); }
 		function setMessage(m) { state.message = m; state.error = null; render(); }
 		function setError(code, msgText) {
 			const map = { config: "err.config", network: "err.network", auth: "err.auth", "not-found": "err.notfound", manifest: "err.manifest" };
@@ -306,9 +310,9 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 							+ (state.credentials.accessKeyIdMasked ? " · " + state.credentials.accessKeyIdMasked : ""))
 						: h("div", { style: { opacity: 0.7, fontSize: 12, marginBottom: 6 } }, t("cred.status.none")),
 					h(Field, { label: t("cred.accessKey") },
-						h("input", { style: inputStyle(), autoComplete: "off", placeholder: "AKIA…", value: state.cred.accessKeyId, onInput: (e) => { state.cred.accessKeyId = e.target.value; } })),
+						h("input", { style: inputStyle(), autoComplete: "off", placeholder: "AKIA…", value: state.cred.accessKeyId, onInput: (e) => setCred({ accessKeyId: e.target.value }) })),
 					h(Field, { label: t("cred.secretKey") },
-						h("input", { style: inputStyle(), type: "password", autoComplete: "new-password", placeholder: "••••••", value: state.cred.secretAccessKey, onInput: (e) => { state.cred.secretAccessKey = e.target.value; } })),
+						h("input", { style: inputStyle(), type: "password", autoComplete: "new-password", placeholder: "••••••", value: state.cred.secretAccessKey, onInput: (e) => setCred({ secretAccessKey: e.target.value }) })),
 					h("div", { style: { display: "flex", gap: 8, margin: "6px 0 0" } },
 						h("button", { style: btnStyle("primary"), disabled: state.busy, onClick: doSaveCredentials }, t("btn.saveCred")),
 						state.credentials.source === "saved"
