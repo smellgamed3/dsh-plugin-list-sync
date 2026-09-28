@@ -99,8 +99,9 @@ check('dependencies rewritten', nextPkg.dependencies['new-plugin'] === '1.0.0' &
 check('official bundles kept at front', nextPkg.dsh.profile.bundles[0] === '@deepseek-ai/dsh-base');
 check('bundle order follows manifest', JSON.stringify(nextPkg.dsh.profile.bundles.slice(1)) === JSON.stringify(remote.bundles));
 const nextPatch = readFileSync(join(profileDir, 'cordis.patch.yml'), 'utf8');
-check('patch rewritten without provider config', !nextPatch.includes('baseURL'));
+check('patch rewritten: local official provider row kept verbatim (config preserved, not synced from manifest)', nextPatch.includes('baseURL'));
 check('patch rewritten with disabled row', nextPatch.includes('disabled: true'));
+check('patch rewritten: manifest rows replace non-official local rows', nextPatch.includes('- id: "cost-meter"'));
 restoreSnapshot(profileDir, snapId);
 const restoredPkg = JSON.parse(readFileSync(join(profileDir, 'package.json'), 'utf8'));
 check('rollback restores dependencies', restoredPkg.dependencies.dshmarket === '1.66.3' && restoredPkg.dependencies['new-plugin'] === undefined);
