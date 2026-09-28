@@ -10,6 +10,7 @@ import { buildManifest, validateManifestBytes, serializeManifest, parsePatchRows
 import { diffManifests } from '../lib/diff.js';
 import { createSnapshot, restoreSnapshot, writeProfileFiles, listSnapshots } from '../lib/apply.js';
 import { manifestKey, normalizeEndpoint, validBucketName, validPrefix } from '../lib/s3.js';
+import { saveCredentials, loadCredentials, clearCredentials, credentialsSource, credentialsPath } from '../lib/credentials-store.js';
 
 let passed = 0;
 let failed = 0;
@@ -118,6 +119,25 @@ check('prefix validated', validPrefix('dsh-plugin-list-sync') === true && validP
 check('manifest key', manifestKey({ prefix: 'pls' }, 'desktop') === 'pls/desktop.json');
 check('manifest key default prefix', manifestKey({}, 'desktop') === 'desktop.json');
 check('profile name escape rejected', throws(() => manifestKey({}, '../evil')));
+
+console.log('credentials store:');
+delete process.env.DSH_PLUGIN_SYNC_S3_KEY;
+delete process.env.DSH_PLUGIN_SYNC_S3_SECRET;
+check('no source initially', credentialsSource(profileDir) === null);
+saveCredentials(profileDir, 'AKIA-TEST-1234', 'secret-value-5678');
+const loaded = loadCredentials(profileDir);
+check('save → load round-trip', loaded !== null && loaded.accessKeyId === 'AKIA-TEST-1234' && loaded.secretAccessKey === 'secret-value-5678');
+check('source is saved after store', credentialsSource(profileDir) === 'saved');
+check('file lives in plugin state dir', credentialsPath(profileDir).includes(join('.dsh-plugin-list-sync', 'credentials.json')));
+check('empty values rejected', throws(() => saveCredentials(profileDir, '', 'x')));
+check('newline injection rejected', throws(() => saveCredentials(profileDir, 'AK\n', 'x')));
+clearCredentials(profileDir);
+check('cleared → source null again', credentialsSource(profileDir) === null && loadCredentials(profileDir) === null);
+process.env.DSH_PLUGIN_SYNC_S3_KEY = 'env-key';
+process.env.DSH_PLUGIN_SYNC_S3_SECRET = 'env-secret';
+check('env fallback after clear', credentialsSource(profileDir) === 'env');
+delete process.env.DSH_PLUGIN_SYNC_S3_KEY;
+delete process.env.DSH_PLUGIN_SYNC_S3_SECRET;
 
 rmSync(profileDir, { recursive: true, force: true });
 console.log(`\n${passed} passed, ${failed} failed`);

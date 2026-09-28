@@ -39,10 +39,10 @@ Open **Settings → Plugin Sync** in the DSH web UI and fill in:
 - **Path-style addressing** — on by default (MinIO/RustFS need it); turn off for virtual-host-style endpoints
 - **Allow plain HTTP** — opt-in only for local/test endpoints
 
-Credentials are **never written to config files**. Provide them either via:
+Credentials are **never written to config files and never included in the sync manifest**. Provide them either via:
 
-- environment variables `DSH_PLUGIN_SYNC_S3_KEY` / `DSH_PLUGIN_SYNC_S3_SECRET`, or
-- the DSH credentials service (set `credentialsRef` in the settings form, e.g. store `accessKeyId:secretAccessKey` under a plugin-scoped credential).
+- the settings page — **AccessKey / SecretKey fields** with Save/Clear buttons; stored locally in `<profile>/.dsh-plugin-list-sync/credentials.json` (priority over env vars), or
+- environment variables `DSH_PLUGIN_SYNC_S3_KEY` / `DSH_PLUGIN_SYNC_S3_SECRET` (used when no saved pair exists).
 
 ## Use
 

@@ -33,8 +33,17 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"s3.prefix.ph": "默认 dsh-plugin-list-sync",
 		"s3.forcePathStyle": "Path-Style 寻址（MinIO/RustFS 需要）",
 		"s3.allowInsecure": "允许明文 HTTP（不安全）",
-		"s3.credentialsRef": "凭据引用（credentials 服务）",
-		"s3.credentialsRef.ph": "如 plugin:dsh-plugin-list-sync:s3 — 留空则用环境变量",
+		"cred.title": "S3 凭据（AccessKey / SecretKey）",
+		"cred.accessKey": "AccessKey ID",
+		"cred.secretKey": "Secret Access Key",
+		"cred.status.saved": "已保存本机凭据",
+		"cred.status.env": "使用环境变量凭据（DSH_PLUGIN_SYNC_S3_KEY/SECRET）",
+		"cred.status.none": "未配置凭据",
+		"cred.hint": "凭据保存在本机 <profile>/.dsh-plugin-list-sync/credentials.json，不会写入同步清单，也不会随插件列表上传。",
+		"btn.saveCred": "保存凭据",
+		"btn.clearCred": "清除已保存凭据",
+		"msg.credSaved": "凭据已保存到本机。",
+		"msg.credCleared": "已清除保存的凭据（如环境变量存在则回退使用）。",
 		"opt.includePatchConfig": "同步 LLM provider 配置（默认关闭）",
 		"opt.machineLabel": "本机标签（写入 manifest 便于识别来源）",
 		"opt.machineLabel.ph": "例如 office-desktop",
@@ -82,8 +91,17 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"s3.prefix.ph": "default dsh-plugin-list-sync",
 		"s3.forcePathStyle": "Path-style addressing (MinIO/RustFS)",
 		"s3.allowInsecure": "Allow plain HTTP (insecure)",
-		"s3.credentialsRef": "Credentials ref (credentials service)",
-		"s3.credentialsRef.ph": "e.g. plugin:dsh-plugin-list-sync:s3 — empty uses env vars",
+		"cred.title": "S3 credentials (AccessKey / SecretKey)",
+		"cred.accessKey": "AccessKey ID",
+		"cred.secretKey": "Secret Access Key",
+		"cred.status.saved": "Credentials saved on this machine",
+		"cred.status.env": "Using environment variables (DSH_PLUGIN_SYNC_S3_KEY/SECRET)",
+		"cred.status.none": "No credentials configured",
+		"cred.hint": "Stored locally in <profile>/.dsh-plugin-list-sync/credentials.json — never included in the sync manifest, never uploaded.",
+		"btn.saveCred": "Save credentials",
+		"btn.clearCred": "Clear saved credentials",
+		"msg.credSaved": "Credentials saved locally.",
+		"msg.credCleared": "Saved credentials cleared (falls back to env vars when present).",
 		"opt.includePatchConfig": "Sync LLM provider config (off by default)",
 		"opt.machineLabel": "Machine label (recorded in the manifest)",
 		"opt.machineLabel.ph": "e.g. office-desktop",
@@ -176,10 +194,12 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		const state = {
 			form: {
 				endpoint: "", region: "auto", bucket: "", prefix: "dsh-plugin-list-sync",
-				forcePathStyle: true, allowInsecure: false, credentialsRef: "",
+				forcePathStyle: true, allowInsecure: false,
 				includePatchConfig: false, machineLabel: "",
 			},
 			status: null, plan: null, busy: false, message: null, error: null, snapshots: [],
+			credentials: { source: null, accessKeyIdMasked: undefined },
+			cred: { accessKeyId: "", secretAccessKey: "" },
 		};
 
 		function setForm(patch) { Object.assign(state.form, patch); render(); }
@@ -191,12 +211,12 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 			state.message = null; render();
 		}
 
-		async function call(path, body) {
+		async function call(path, body, method) {
 			state.busy = true; state.error = null; state.message = fmt(t, "msg.working"); render();
 			try {
 				const res = await fetch(api(path), {
-					method: "POST", cache: "no-store", headers: { "content-type": "application/json" },
-					body: JSON.stringify(body ?? {}),
+					method: method ?? "POST", cache: "no-store", headers: { "content-type": "application/json" },
+					body: method === "DELETE" ? undefined : JSON.stringify(body ?? {}),
 				});
 				const data = await res.json();
 				state.busy = false;
@@ -216,8 +236,32 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 			try {
 				const res = await fetch(api("/dsh-plugin-list-sync/api/status"), { cache: "no-store" });
 				const data = await res.json();
-				if (data.ok === true) { state.status = data; state.snapshots = data.snapshots ?? []; render(); }
+				if (data.ok === true) {
+					state.status = data; state.snapshots = data.snapshots ?? [];
+					if (data.credentials !== undefined) state.credentials = data.credentials;
+					render();
+				}
 			} catch { /* status is decorative */ }
+		}
+
+		async function doSaveCredentials() {
+			const data = await call("/dsh-plugin-list-sync/api/credentials", {
+				accessKeyId: state.cred.accessKeyId.trim(),
+				secretAccessKey: state.cred.secretAccessKey.trim(),
+			}, "PUT");
+			if (data === null) return;
+			state.cred.accessKeyId = ""; state.cred.secretAccessKey = "";
+			state.credentials = { source: data.source, accessKeyIdMasked: data.accessKeyIdMasked };
+			setMessage(t("msg.credSaved"));
+			refreshStatus();
+		}
+
+		async function doClearCredentials() {
+			const data = await call("/dsh-plugin-list-sync/api/credentials", null, "DELETE");
+			if (data === null) return;
+			state.credentials = { source: data.source, accessKeyIdMasked: undefined };
+			setMessage(t("msg.credCleared"));
+			refreshStatus();
 		}
 
 		/** ---------- panel ---------- */
@@ -252,9 +296,27 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 					h("input", { type: "checkbox", checked: form.forcePathStyle, onChange: (e) => setForm({ forcePathStyle: e.target.checked }) })),
 				h(Field, { label: t("s3.allowInsecure") },
 					h("input", { type: "checkbox", checked: form.allowInsecure, onChange: (e) => setForm({ allowInsecure: e.target.checked }) })),
-				h(Field, { label: t("s3.credentialsRef") },
-					h("input", { style: inputStyle(), placeholder: t("s3.credentialsRef.ph"), value: form.credentialsRef, onInput: (e) => setForm({ credentialsRef: e.target.value }) }),
-					h("div", { style: { opacity: 0.65, fontSize: 12, marginTop: 2 } }, t("hint.credentials"))),
+
+				// credentials block
+				h("div", { style: { margin: "12px 0 4px", padding: "10px", borderRadius: 8, border: "1px solid var(--dsh-border, #8884)" } },
+					h("div", { style: { fontWeight: 600, marginBottom: 6 } }, t("cred.title")),
+					state.credentials.source !== null
+						? h("div", { style: { opacity: 0.8, fontSize: 12, marginBottom: 6 } },
+							t("cred.status." + state.credentials.source)
+							+ (state.credentials.accessKeyIdMasked ? " · " + state.credentials.accessKeyIdMasked : ""))
+						: h("div", { style: { opacity: 0.7, fontSize: 12, marginBottom: 6 } }, t("cred.status.none")),
+					h(Field, { label: t("cred.accessKey") },
+						h("input", { style: inputStyle(), autoComplete: "off", placeholder: "AKIA…", value: state.cred.accessKeyId, onInput: (e) => { state.cred.accessKeyId = e.target.value; } })),
+					h(Field, { label: t("cred.secretKey") },
+						h("input", { style: inputStyle(), type: "password", autoComplete: "new-password", placeholder: "••••••", value: state.cred.secretAccessKey, onInput: (e) => { state.cred.secretAccessKey = e.target.value; } })),
+					h("div", { style: { display: "flex", gap: 8, margin: "6px 0 0" } },
+						h("button", { style: btnStyle("primary"), disabled: state.busy, onClick: doSaveCredentials }, t("btn.saveCred")),
+						state.credentials.source === "saved"
+							? h("button", { style: btnStyle("danger"), disabled: state.busy, onClick: doClearCredentials }, t("btn.clearCred"))
+							: null),
+					h("div", { style: { opacity: 0.65, fontSize: 12, marginTop: 6 } }, t("cred.hint")),
+				),
+
 				h(Field, { label: t("opt.includePatchConfig") },
 					h("input", { type: "checkbox", checked: form.includePatchConfig, onChange: (e) => setForm({ includePatchConfig: e.target.checked }) })),
 				h(Field, { label: t("opt.machineLabel") },
