@@ -259,6 +259,10 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 				});
 				const data = await res.json();
 				state.busy = false;
+				// Successful callers render a result (preview) or a completion message
+				// (upload/apply/rollback). Remove the transient loading text first so
+				// preview does not misleadingly remain at “处理中…”.
+				state.message = null;
 				if (!res.ok || data.ok === false) {
 					setError(data?.error?.code ?? "other", data?.error?.message ?? String(res.status));
 					return null;
