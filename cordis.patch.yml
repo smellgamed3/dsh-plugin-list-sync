@@ -1,0 +1,5 @@
+# Bundle patch layer: inserts this plugin's host half (lib/index.js) and
+# declares the web client half (client/client.js) for the settings page.
+- insert:
+    - id: dsh-plugin-list-sync
+      name: dsh-plugin-list-sync
