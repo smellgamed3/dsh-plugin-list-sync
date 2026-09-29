@@ -184,6 +184,12 @@ key: dsh-plugin-list-sync.form
 
 Host 同时兼容历史扁平字段，避免旧缓存页面与新 Host 短暂不兼容。
 
+## 半自动化控制器
+
+`lib/automation.js` 只接收 `upload(config)` 和 `checkRemote(config)` 两个能力，不接收 `applyRemote`、插件安装、插件移除或 Profile 写入回调。因此它的能力在结构上被限制为：监听本地文件后上传，以及周期检查后标记 `remoteUpdateAvailable`。
+
+远端更新仍只能经显式的人工 `/api/apply` 流程落地。手动 apply/rollback 会调用 `suppressUploads()`，避免 watcher 把远端状态回显上传。自动化策略写入 `<profile>/.dsh-plugin-list-sync/settings.json`，不含凭据，因此页面关闭后 Host 仍可继续安全运行。
+
 ## 兼容性原则
 
 - 运行时仅硬依赖 `@deepseek-ai/cordis`。

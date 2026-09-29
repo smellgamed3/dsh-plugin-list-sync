@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- 可选文件变化 debounce 自动上传与可选定时远端更新检查。
+- Profile 私有非敏感 `settings.json` 自动化策略存储。
+- 自动化状态、最近上传/检查和错误状态 API。
+
+### Changed
+
+- 自动化控制器不持有 apply、安装、移除或远端 Profile 写入能力；远端变更始终需人工确认。
+- 手动 apply/rollback 会抑制 watcher 上传，避免远端状态回显覆盖。
+
 ### Documentation
 
 - 补充中文主文档、架构说明、部署与排错手册、贡献与发布维护指南。

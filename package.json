@@ -15,8 +15,8 @@
     "url": "https://github.com/smellgamed3/dsh-plugin-list-sync/issues"
   },
   "scripts": {
-    "check": "node --check lib/index.js && node --check lib/s3.js && node --check lib/manifest.js && node --check lib/apply.js && node --check lib/credentials-store.js && node test/selftest.mjs",
-    "test": "node test/selftest.mjs",
+    "check": "node --check lib/index.js && node --check lib/s3.js && node --check lib/manifest.js && node --check lib/apply.js && node --check lib/credentials-store.js && node --check lib/settings-store.js && node --check lib/automation.js && node test/selftest.mjs && node test/settings-store.mjs && node test/automation.mjs",
+    "test": "node test/selftest.mjs && node test/settings-store.mjs && node test/automation.mjs",
     "test:e2e": "node test/e2e.mjs",
     "test:s3-mock": "node test/s3-mock.mjs"
   },

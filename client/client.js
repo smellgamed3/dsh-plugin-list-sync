@@ -47,6 +47,18 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"msg.credCleared": "已清除保存的凭据（如环境变量存在则回退使用）。",
 		"opt.includePatchConfig": "同步 LLM provider 配置（默认关闭）",
 		"opt.machineLabel": "本机标签（写入 manifest 便于识别来源）",
+		"automation.title": "半自动同步（不自动应用）",
+		"automation.autoUpload": "本地插件配置变化后自动上传",
+		"automation.uploadDebounce": "自动上传等待秒数（3–300）",
+		"automation.autoCheck": "定时检查远端更新（仅提示）",
+		"automation.checkInterval": "远端检查间隔分钟（1–1440）",
+		"automation.hint": "自动任务绝不会自动下载、安装、移除或应用远端插件配置；发现远端更新后请先预览差异。",
+		"automation.remoteUpdate": "发现远端配置更新，请预览差异后手动应用。",
+		"automation.runningUpload": "正在自动上传本地插件配置。",
+		"automation.runningCheck": "正在检查远端更新。",
+		"automation.error": "自动同步最近错误：{message}",
+		"btn.saveSettings": "保存同步设置",
+		"msg.settingsSaved": "同步设置已保存；自动任务已按新设置重配。",
 		"opt.machineLabel.ph": "例如 office-desktop",
 		"btn.upload": "上传当前插件列表",
 		"btn.preview": "预览差异",
@@ -106,6 +118,18 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"msg.credCleared": "Saved credentials cleared (falls back to env vars when present).",
 		"opt.includePatchConfig": "Sync LLM provider config (off by default)",
 		"opt.machineLabel": "Machine label (recorded in the manifest)",
+		"automation.title": "Semi-automatic sync (never auto-apply)",
+		"automation.autoUpload": "Automatically upload after local plugin configuration changes",
+		"automation.uploadDebounce": "Auto-upload debounce seconds (3–300)",
+		"automation.autoCheck": "Periodically check remote updates (notify only)",
+		"automation.checkInterval": "Remote check interval minutes (1–1440)",
+		"automation.hint": "Automation never downloads, installs, removes, or applies remote plugin configuration. Preview changes before applying them yourself.",
+		"automation.remoteUpdate": "A remote configuration update is available; preview differences before applying.",
+		"automation.runningUpload": "Automatically uploading local plugin configuration.",
+		"automation.runningCheck": "Checking for remote updates.",
+		"automation.error": "Latest automation error: {message}",
+		"btn.saveSettings": "Save sync settings",
+		"msg.settingsSaved": "Sync settings saved; automation was reconfigured.",
 		"opt.machineLabel.ph": "e.g. office-desktop",
 		"btn.upload": "Upload current list",
 		"btn.preview": "Preview diff",
@@ -209,9 +233,13 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 				endpoint: "", region: "auto", bucket: "", prefix: "dsh-plugin-list-sync",
 				forcePathStyle: true, allowInsecure: false, serverSideEncryption: false,
 				includePatchConfig: false, machineLabel: "",
+				autoUpload: false, uploadDebounceSeconds: 8,
+				autoCheck: false, checkIntervalMinutes: 15,
 			}, loadStoredForm()),
 			status: null, plan: null, busy: false, message: null, error: null, snapshots: [],
 			credentials: { source: null, accessKeyIdMasked: undefined },
+			automation: null,
+			settingsLoaded: false,
 			cred: { accessKeyId: "", secretAccessKey: "" },
 		};
 
@@ -232,11 +260,42 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 				},
 				includePatchConfig: f.includePatchConfig,
 				machineLabel: f.machineLabel,
+				automation: {
+					autoUpload: f.autoUpload === true,
+					uploadDebounceSeconds: Number(f.uploadDebounceSeconds),
+					autoCheck: f.autoCheck === true,
+					checkIntervalMinutes: Number(f.checkIntervalMinutes),
+				},
 			};
 		}
 
 		function formConfigured() {
 			return state.form.endpoint.trim() !== "" && state.form.bucket.trim() !== "";
+		}
+
+		function adoptSettings(settings) {
+			if (settings === null || typeof settings !== "object") return;
+			const s3 = settings.s3 && typeof settings.s3 === "object" ? settings.s3 : {};
+			const automation = settings.automation && typeof settings.automation === "object" ? settings.automation : {};
+			Object.assign(state.form, s3, {
+				includePatchConfig: settings.includePatchConfig === true,
+				machineLabel: typeof settings.machineLabel === "string" ? settings.machineLabel : "",
+				autoUpload: automation.autoUpload === true,
+				uploadDebounceSeconds: automation.uploadDebounceSeconds ?? 8,
+				autoCheck: automation.autoCheck === true,
+				checkIntervalMinutes: automation.checkIntervalMinutes ?? 15,
+			});
+			try { localStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(state.form)); } catch { /* private mode */ }
+		}
+
+		async function doSaveSettings() {
+			const data = await call("/dsh-plugin-list-sync/api/config", { settings: s3Payload() }, "PUT");
+			if (data === null) return;
+			state.settingsLoaded = true;
+			if (data.settings !== undefined) adoptSettings(data.settings);
+			if (data.automation !== undefined) state.automation = data.automation;
+			setMessage(t("msg.settingsSaved"));
+			refreshStatus();
 		}
 		/** Controlled-input setter for the credentials fields: mutate + re-render,
 		 *  exactly like setForm — without the render() call React snaps the value
@@ -282,6 +341,11 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 				if (data.ok === true) {
 					state.status = data; state.snapshots = data.snapshots ?? [];
 					if (data.credentials !== undefined) state.credentials = data.credentials;
+					if (data.automation !== undefined) state.automation = data.automation;
+					if (!state.settingsLoaded && data.settings !== null && data.settings !== undefined) {
+						adoptSettings(data.settings);
+						state.settingsLoaded = true;
+					}
 					render();
 				}
 			} catch { /* status is decorative */ }
@@ -319,6 +383,16 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 						h("span", { key: "s" }, fmt(t, "status.snapshots", { n: state.status?.snapshots?.length ?? 0 })),
 					]
 					: h("span", null, t("status.notConfigured"));
+			const automation = state.automation;
+			const automationNotice = automation?.remoteUpdateAvailable
+				? h("div", { style: { margin: "8px 0", color: "var(--dsh-warn, #a65f00)", fontSize: 13 } }, t("automation.remoteUpdate"))
+				: automation?.uploadRunning
+					? h("div", { style: { margin: "8px 0", fontSize: 13 } }, t("automation.runningUpload"))
+					: automation?.checkRunning
+						? h("div", { style: { margin: "8px 0", fontSize: 13 } }, t("automation.runningCheck"))
+						: automation?.lastAutoError
+							? h("div", { style: { margin: "8px 0", color: "var(--dsh-err, #c33)", fontSize: 13 } }, fmt(t, "automation.error", { message: automation.lastAutoError.message }))
+							: null;
 			return h("div", { style: { padding: "4px 0", fontSize: 13, lineHeight: 1.5 } },
 				h("h3", { style: { margin: "0 0 4px" } }, t("title")),
 				h("p", { style: { opacity: 0.75, marginTop: 0 } }, t("desc")),
@@ -327,6 +401,7 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 				h("div", { style: { margin: "8px 0", padding: "8px 10px", borderRadius: 8, border: "1px solid var(--dsh-border, #8884)" } },
 					h("strong", null, t("status.title"), " · "),
 					statusContent),
+				automationNotice,
 
 				// S3 connection form
 				h(Field, { label: t("s3.endpoint") },
@@ -368,6 +443,20 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 					h("input", { type: "checkbox", checked: form.includePatchConfig, onChange: (e) => setForm({ includePatchConfig: e.target.checked }) })),
 				h(Field, { label: t("opt.machineLabel") },
 					h("input", { style: inputStyle(), placeholder: t("opt.machineLabel.ph"), value: form.machineLabel, onInput: (e) => setForm({ machineLabel: e.target.value }) })),
+
+				h("div", { style: { margin: "14px 0 6px", padding: "10px", borderRadius: 8, border: "1px solid var(--dsh-border, #8884)" } },
+					h("div", { style: { fontWeight: 600, marginBottom: 6 } }, t("automation.title")),
+					h(Field, { label: t("automation.autoUpload") },
+						h("input", { type: "checkbox", checked: form.autoUpload === true, onChange: (e) => setForm({ autoUpload: e.target.checked }) })),
+					h(Field, { label: t("automation.uploadDebounce") },
+						h("input", { style: inputStyle(), type: "number", min: 3, max: 300, value: form.uploadDebounceSeconds, onInput: (e) => setForm({ uploadDebounceSeconds: e.target.value }) })),
+					h(Field, { label: t("automation.autoCheck") },
+						h("input", { type: "checkbox", checked: form.autoCheck === true, onChange: (e) => setForm({ autoCheck: e.target.checked }) })),
+					h(Field, { label: t("automation.checkInterval") },
+						h("input", { style: inputStyle(), type: "number", min: 1, max: 1440, value: form.checkIntervalMinutes, onInput: (e) => setForm({ checkIntervalMinutes: e.target.value }) })),
+					h("button", { style: btnStyle("primary"), disabled: state.busy, onClick: doSaveSettings }, t("btn.saveSettings")),
+					h("div", { style: { opacity: 0.7, fontSize: 12, marginTop: 6 } }, t("automation.hint")),
+				),
 
 				// actions
 				h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0 6px" } },

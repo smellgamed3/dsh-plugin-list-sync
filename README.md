@@ -62,6 +62,12 @@ Command surface (any DSH chat):
 /plugin-sync rollback [snapshot-id]
 ```
 
+## Semi-automatic sync
+
+Both automation switches are **off by default**. After saving settings, the Host can debounce-upload local `package.json` / `cordis.patch.yml` changes and periodically check remote differences. It **never** downloads, installs, removes, or applies remote plugin configuration automatically; a user must still preview and explicitly apply any remote change.
+
+Non-secret automation settings live in `<profile>/.dsh-plugin-list-sync/settings.json`; credentials remain separate and never enter a manifest.
+
 ## Safety model
 
 1. **Download-side strict validation** — a remote manifest is applied only after schema whitelisting (format/version/revision, npm-style package names, bounded sizes). Anything outside the schema refuses to apply.
