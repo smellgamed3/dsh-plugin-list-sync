@@ -1,0 +1,23 @@
+# Package-manager artifacts
+node_modules/
+pnpm-lock.yaml
+
+# Local S3 mock / test data
+.test-s3/
+.e2e-backup/
+
+# Runtime secrets and local plugin state
+.dsh-plugin-list-sync/
+credentials.json
+
+# Logs and OS/editor files
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Coverage and build output
+coverage/
+dist/
+lib/**/*.map

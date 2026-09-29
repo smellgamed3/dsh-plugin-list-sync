@@ -1,5 +1,7 @@
 # dsh-plugin-list-sync
 
+[中文文档](README.zh.md) · [Architecture（架构）](docs/architecture.zh.md) · [Operations（部署与排错）](docs/operations.zh.md) · [Contributing（贡献指南）](CONTRIBUTING.zh.md) · [Changelog](CHANGELOG.md)
+
 Synchronize the plugin-list configuration of [DeepSeek Harness](https://github.com/deepseek-ai) (DSH) clients through any **S3-compatible** object store — AWS S3, MinIO, RustFS, Cloudflare R2, Aliyun OSS (S3 gateway), etc.
 
 DSH 插件列表多端同步：把当前客户端的插件清单上传到任意 S3 兼容存储，在其他客户端下载并应用，实现多端插件配置一致。
@@ -38,6 +40,8 @@ Open **Settings → Plugin Sync** in the DSH web UI and fill in:
 - **Bucket** + optional **key prefix**
 - **Path-style addressing** — on by default (MinIO/RustFS need it); turn off for virtual-host-style endpoints
 - **Allow plain HTTP** — opt-in only for local/test endpoints
+- **Request SSE-S3 AES256 encryption** — off by default; enable only when the S3 backend has SSE-S3/KMS configured (keep it off for RustFS without `RUSTFS_SSE_S3_MASTER_KEY`)
+- **Request SSE-S3 AES256 encryption** — off by default; enable only when the S3 backend has SSE-S3/KMS configured (keep it off for RustFS without `RUSTFS_SSE_S3_MASTER_KEY`)
 
 Credentials are **never written to config files and never included in the sync manifest**. Provide them either via:
 
@@ -88,7 +92,10 @@ One JSON object per profile: `s3://<bucket>/<prefix>/<profile-name>.json`.
 ## Development
 
 ```bash
-node test/selftest.mjs   # 33 assertions: manifest → validate → diff → snapshot → restore
+pnpm run check          # syntax checks + core regression suite
+pnpm test               # core regression suite
+pnpm run test:s3-mock   # terminal A: local SigV4-validating S3 mock
+pnpm run test:e2e       # terminal B: full S3 upload/download/apply/rollback flow
 ```
 
 Pure Node built-ins (`node:https`, `node:crypto`, `node:fs`, `node:path`); zero runtime dependencies; SigV4 implemented in ~200 lines (`lib/s3.js`).
