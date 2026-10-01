@@ -17,7 +17,7 @@ The plugin-list configuration is exactly two files in a DSH profile:
 
 **Both directions are MERGE-only by default.** Uploading never deletes remote-only plugins; downloading never removes a locally installed plugin and never downgrades a locally higher version (per-package the HIGHER side wins; an older remote revision is reported as *kept-local*, never applied).
 
-Force overwrite exists as an **explicit, one-shot, never-persisted opt-in**: two red-bordered checkboxes in the settings page ("force overwrite remote" on upload / "force overwrite local" on apply). They are stored nowhere (not in localStorage, not in settings.json), reset automatically after every operation, and force-local additionally requires re-previewing the replace plan and passing a confirmation dialog that spells out the exact removals/downgrades. See the operations section in the Chinese README.
+Force overwrite exists as an **explicit, one-shot, never-persisted opt-in** — see [Force overwrite](#force-overwrite-dangerous-opt-in-per-operation) under **Use**.
 
 - Official `@deepseek-ai/*` bundles are **never synced**: they track each client's own DSH runtime, and syncing them would re-create the peer-dependency breakages the DSH plugin gate exists to prevent.
 - **LLM provider config is excluded by default** (the `config:` blocks of rows like `llm-pi-ai` / `agent-default-model` carry baseURLs and model catalogs). Enable `includePatchConfig` if you want it synced; when disabled, those rows keep only their structural keys (`id` / `name` / `disabled`).
@@ -45,7 +45,8 @@ Open **Settings → Plugin Sync** in the DSH web UI and fill in:
 - **Path-style addressing** — on by default (MinIO/RustFS need it); turn off for virtual-host-style endpoints
 - **Allow plain HTTP** — opt-in only for local/test endpoints
 - **Request SSE-S3 AES256 encryption** — off by default; enable only when the S3 backend has SSE-S3/KMS configured (keep it off for RustFS without `RUSTFS_SSE_S3_MASTER_KEY`)
-- **Request SSE-S3 AES256 encryption** — off by default; enable only when the S3 backend has SSE-S3/KMS configured (keep it off for RustFS without `RUSTFS_SSE_S3_MASTER_KEY`)
+- **Sync LLM provider config** — off by default; carries the full patch layer including private gateways and model catalogs
+- **Machine label** — recorded in the manifest's `source.label` for audit, e.g. `office-desktop`
 
 Credentials are **never written to config files and never included in the sync manifest**. Provide them either via:
 
@@ -54,21 +55,38 @@ Credentials are **never written to config files and never included in the sync m
 
 ## Use
 
-Settings page buttons: **Preview diff** (dry-run against the remote manifest), **Upload current list**, **Download && apply**, **Rollback** (restores the latest snapshot; every apply snapshots both files first).
+Settings page buttons: **Preview diff** (dry-run against the remote manifest), **Upload current list**, **Download && apply**, **Rollback** (restores the latest snapshot; every apply snapshots both files first). Every operation is a **merge** by default; see below for the force overwrite switches.
+
+### Force overwrite (dangerous, opt-in per operation)
+
+A red-bordered **Force overwrite** block at the bottom of the settings page holds two independent switches. They are **explicit one-shot operations**:
+
+| Switch | Effect | Cost |
+|---|---|---|
+| Force overwrite remote | Upload replaces the remote manifest with this machine's state | Remote-only plugins are removed from the manifest — affects every client syncing that store |
+| Force overwrite local | Apply mirrors the remote manifest locally | Local-only third-party plugins are uninstalled; shared versions may drop |
+
+Safety constraints:
+
+- **Never persisted**: the ticks live only in component state (not in localStorage, not in `settings.json`, not anywhere); they apply to the next operation only and reset automatically after it, successful or not.
+- **Double confirmation (force local)**: you must first re-preview with the tick ON to see the replace plan (applying without it is rejected server-side with `confirm-required`), then pass a confirmation dialog that spells out the exact removals/downgrades.
+- **Official components are never sacrificed**: even in replace mode, `@deepseek-ai/*` official bundles, this plugin itself, and LLM provider `config:` blocks stay verbatim.
+- **Snapshots still run first**: a replace apply snapshots both files and can be rolled back.
+- **Command surface is limited**: `upload --force` replaces the remote and `diff --force` previews the replace plan, but `pull --force` is refused — force-overwriting local must go through the settings page's confirmation flow.
 
 Command surface (any DSH chat):
 
 ```
 /plugin-sync status
-/plugin-sync upload
-/plugin-sync diff
+/plugin-sync upload [--force]
+/plugin-sync diff [--force]
 /plugin-sync pull
 /plugin-sync rollback [snapshot-id]
 ```
 
 ## Semi-automatic sync
 
-Both automation switches are **off by default**. After saving settings, the Host can debounce-upload local `package.json` / `cordis.patch.yml` changes and periodically check remote differences. It **never** downloads, installs, removes, or applies remote plugin configuration automatically; a user must still preview and explicitly apply any remote change.
+Both automation switches are **off by default**. After saving settings, the Host can debounce-upload local `package.json` / `cordis.patch.yml` changes and periodically check remote differences. It **never** downloads, installs, removes, or applies remote plugin configuration automatically; a user must still preview and explicitly apply any remote change. Automatic uploads use the same merge semantics as the manual button.
 
 Non-secret automation settings live in `<profile>/.dsh-plugin-list-sync/settings.json`; credentials remain separate and never enter a manifest.
 
@@ -80,7 +98,8 @@ Non-secret automation settings live in `<profile>/.dsh-plugin-list-sync/settings
 4. **Revision monotonicity** — uploads increment the remote revision; a pull never applies an older revision silently.
 5. **Same-origin fence** — every mutating route rejects cross-site requests (Origin/Host discipline).
 6. **Optimistic locking** — uploads carry `If-Match` with the observed ETag where the server supports it.
-7. **Minimal peer surface** — the only peer dependency is `@deepseek-ai/cordis` (ships with DSH). Everything else (`commands`, `webServer`, `pluginManager`, `credentials`, `settings`) is feature-detected at runtime; a host missing a service keeps that surface disabled instead of failing to load.
+7. **Official components stay local** — `@deepseek-ai/*` bundles track each client's DSH runtime and are never synced across machines.
+8. **Minimal peer surface** — the only peer dependency is `@deepseek-ai/cordis` (ships with DSH). Everything else (`commands`, `webServer`, `pluginManager`, `credentials`, `settings`) is feature-detected at runtime; a host missing a service keeps that surface disabled instead of failing to load.
 
 ## Manifest format
 
@@ -106,8 +125,10 @@ One JSON object per profile: `s3://<bucket>/<prefix>/<profile-name>.json`.
 pnpm run check          # syntax checks + core regression suite
 pnpm test               # core regression suite
 pnpm run test:s3-mock   # terminal A: local SigV4-validating S3 mock
-pnpm run test:e2e       # terminal B: full S3 upload/download/apply/rollback flow
+pnpm run test:e2e       # terminal B: full S3 merge/force upload + apply/rollback flow
 ```
+
+The e2e suite runs against an isolated throwaway profile (never your real one) and covers both merge and force semantics end to end.
 
 Pure Node built-ins (`node:https`, `node:crypto`, `node:fs`, `node:path`); zero runtime dependencies; SigV4 implemented in ~200 lines (`lib/s3.js`).
 

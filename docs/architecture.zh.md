@@ -75,20 +75,20 @@
 
 对协议做破坏性修改时必须提高 `version`，在解析层显式实现迁移，并保留旧版本读取策略或给出明确拒绝信息。
 
-## 上传流程（合并式）
+## 上传流程（默认合并式）
 
 ```text
 GET object
   ├─ 不存在：revision = 0，首次上传
   ├─ 存在且合法：严格验证 manifest，读取 revision + HEAD 的 ETag
-  └─ 存在但损坏：拒绝覆盖（不静默丢弃未知内容）
+  └─ 存在但损坏：拒绝覆盖（不静默丢弃未知内容；force 例外，见下）
 
 buildManifest(profile, revision + 1)
   ├─ 过滤官方 bundle / 本插件自身
   ├─ 默认剥离 LLM provider 详细 config
   └─ 生成稳定 JSON
 
-mergeManifests(local, remote)
+mergeManifests(local, remote)          ← 默认；force 时跳过，直接用 local
   ├─ packages：并集；共同包取更高版本（绝不降级、绝不丢弃任一侧）
   ├─ bundles：并集（远端顺序在前，本地独有追加）
   └─ patch：按 id 并集；共享行同步 disabled，config 保留本地
@@ -99,9 +99,11 @@ PUT object
   └─ 可选 x-amz-server-side-encryption: AES256
 ```
 
-上传是"本地合并进远端"：仅存在于远端的插件被保留（本机未安装不会从远端删除它们），共同插件取两端更高版本。上传结果报告 `preservedRemotePackages` 与 `keptLocalVersions`。
+上传是“本地合并进远端”：仅存在于远端的插件被保留（本机未安装不会从远端删除它们），共同插件取两端更高版本。上传结果报告 `preservedRemotePackages` 与 `keptLocalVersions`。
 
-## 下载与应用流程（合并式）
+**force 上传**（`--force` 或设置页勾选）跳过 `mergeManifests`，直接以本机状态替换远端对象：远端独有插件被移除（结果报告 `droppedRemotePackages`），远端损坏对象也允许被覆盖。这是一个显式的一次性选择，见“强制覆盖”一节。
+
+## 下载与应用流程（默认合并式）
 
 ```text
 GET object
@@ -119,7 +121,7 @@ writeProfileFiles（合并写入）
   ├─ bundles：并集（本地顺序在前）
   └─ cordis.patch.yml：本地行含 config 原样保留；disabled 随远端；远端独有行追加
   ↓
-pluginManager.installBundle（只安装与升级，绝不 removeBundle）
+pluginManager.installBundle（默认只安装与升级，不调用 removeBundle）
   ↓
 成功：报告结果
 失败：保留快照，允许 rollback
@@ -134,7 +136,7 @@ pluginManager.installBundle（只安装与升级，绝不 removeBundle）
 
 ### 强制覆盖（replace 模式，显式一次性选择）
 
-`diffManifests(local, remote, { mode: 'replace' })` 与 `writeProfileFiles(..., { mode: 'replace' })` 提供镜像语义：本地独有第三方包成为 `removals`、更旧的远端版本成为 `downgrades`、`removeBundle` 会被调用。它的安全边界：
+`diffManifests(local, remote, { mode: 'replace' })` 与 `writeProfileFiles(..., { mode: 'replace' })` 提供镜像语义：本地独有第三方包成为 `removals`、更旧的远端版本成为 `downgrades`、`orchestrateInstalls` 在 replace 模式下会调用 `removeBundle`。上传侧的 force（`uploadManifest(..., { force: true })`）跳过合并直接替换远端对象。它们共同的安全边界：
 
 - **传输层防护**：`/api/apply` 收到 `mode: 'replace'` 时必须同时携带 `confirmReplace: true`，否则以 `confirm-required` 拒绝——客户端必须先展示 replace 计划再确认。
 - **不持久化**：force 开关只存在于客户端 `state.forceUpload` / `state.forceApply`（不在 `state.form`，不进 localStorage/settings.json），每次操作后复位。
@@ -253,8 +255,7 @@ pnpm run test:e2e       # mock 启动后
 
 1. 接入 DSH 原生 credentials service（保持平滑迁移）。
 2. 增加 manifest 历史版本和远端 revision 浏览。
-3. 支持冲突提示和显式合并策略，而非仅 last-write-wins。
-4. 为 S3 兼容端点维护认证/寻址互操作测试矩阵。
-5. 发布 npm 包及签名发行物，降低 GitHub 安装路径的供应链风险。
+3. 为 S3 兼容端点维护认证/寻址互操作测试矩阵。
+4. 发布 npm 包及签名发行物，降低 GitHub 安装路径的供应链风险。
 
 任何新增功能都应保持：**预览先于写入、快照先于应用、凭据永不上传、官方 bundle 不跨机覆盖、默认合并永不删除本地插件或降低本地版本、破坏性替换必须显式一次性选择并确认**。
