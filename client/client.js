@@ -69,14 +69,31 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"status.notConfigured": "尚未配置 S3 端点/桶。",
 		"status.packages": "本地第三方插件 {n} 个",
 		"status.snapshots": "可回滚快照 {n} 个",
-		"plan.title": "远端差异",
+		"plan.title": "远端差异（合并计划）",
 		"plan.empty": "已同步，无差异。",
 		"plan.install": "新增",
 		"plan.upgrade": "升级",
 		"plan.downgrade": "降级",
 		"plan.remove": "移除",
+		"plan.kept": "保留本地版本（远端更旧，不降级）",
+		"plan.localOnly": "本地独有（合并不移除，将在下次上传时共享）",
 		"plan.patch": "cordis.patch.yml 有差异",
+		"plan.mergeHint": "合并语义：只新增与升级，不移除本地插件、不降级本地版本。",
+		"plan.replaceHint": "强制覆盖语义：本地将完全镜像远端，以下插件会被卸载、版本会被降低。",
+		"force.title": "强制覆盖（危险操作，每次需重新勾选）",
+		"force.upload": "强制覆盖远端（用本机状态替换远端清单，远端独有插件会被移除）",
+		"force.apply": "强制覆盖本地（用远端清单替换本地，本地独有插件会被卸载、版本可被降低）",
+		"force.hint": "默认上传/下载均为安全合并。勾选后仅对下一次操作生效，操作完成自动复位，不会被保存。",
+		"confirm.forceUpload": "确定要强制覆盖远端吗？\n\n远端清单中存在、但本机未安装的插件将从远端移除；远端更旧的版本也会被本机版本覆盖。\n\n此操作影响所有同步该存储的其他客户端。",
+		"confirm.forceApply": "确定要强制覆盖本地吗？\n\n将卸载本地独有插件：{removals}\n将降级以下版本：{downgrades}\n\n应用前会创建快照，可回滚。",
+		"confirm.none": "（无）",
+		"msg.forceCancelled": "已取消强制覆盖，未做任何更改。",
+		"msg.uploadedForce": "已强制上传 revision {revision}（{packages} 个插件，{bytes} 字节）——远端已被本机状态替换。",
+		"msg.uploadDropped": "已从远端移除 {n} 个仅远端存在的插件：{list}",
+		"err.needReplacePreview": "请先以“强制覆盖本地”勾选状态点击“预览差异”，确认移除/降级清单后再应用。",
 		"msg.uploaded": "已上传 revision {revision}（{packages} 个插件，{bytes} 字节）。",
+		"msg.uploadPreserved": "上传已保留 {n} 个仅存在于远端的插件：{list}",
+		"msg.uploadKeptLocal": "已保留 {n} 个更高的本地版本：{list}",
 		"msg.applied": "已应用远端清单（快照 {snapshot}）。",
 		"msg.appliedNoop": "无差异，未做任何更改。",
 		"msg.restored": "已回滚到 {snapshot}。",
@@ -140,14 +157,31 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 		"status.notConfigured": "S3 endpoint/bucket not configured yet.",
 		"status.packages": "{n} third-party packages locally",
 		"status.snapshots": "{n} rollback snapshots",
-		"plan.title": "Remote differences",
+		"plan.title": "Remote differences (merge plan)",
 		"plan.empty": "In sync — no differences.",
 		"plan.install": "install",
 		"plan.upgrade": "upgrade",
 		"plan.downgrade": "downgrade",
 		"plan.remove": "remove",
+		"plan.kept": "kept local version (remote is older; no downgrade)",
+		"plan.localOnly": "local-only (merge keeps it; shared on next upload)",
 		"plan.patch": "cordis.patch.yml differs",
+		"plan.mergeHint": "Merge semantics: additions and upgrades only — local plugins are never removed, local versions never downgraded.",
+		"plan.replaceHint": "Force semantics: local will mirror the remote exactly — the plugins above will be uninstalled and versions lowered.",
+		"force.title": "Force overwrite (dangerous; re-tick every time)",
+		"force.upload": "Force overwrite REMOTE (replace the remote manifest with this machine's state; remote-only plugins are removed)",
+		"force.apply": "Force overwrite LOCAL (replace local with the remote manifest; local-only plugins are uninstalled, versions may drop)",
+		"force.hint": "Upload/download default to a safe merge. A tick applies to the next operation only and resets automatically; it is never saved.",
+		"confirm.forceUpload": "Force overwrite the remote manifest?\n\nPlugins that exist only on the remote (not installed here) will be REMOVED from it; older remote versions will be overwritten by local ones.\n\nThis affects every client syncing this store.",
+		"confirm.forceApply": "Force overwrite local?\n\nLocal-only plugins to uninstall: {removals}\nVersions to downgrade: {downgrades}\n\nA snapshot is taken first and can be rolled back.",
+		"confirm.none": "(none)",
+		"msg.forceCancelled": "Force overwrite cancelled; nothing was changed.",
+		"msg.uploadedForce": "Force-uploaded revision {revision} ({packages} packages, {bytes} bytes) — the remote was replaced by this machine's state.",
+		"msg.uploadDropped": "Removed {n} remote-only plugin(s) from the remote: {list}",
+		"err.needReplacePreview": "Click \"Preview diff\" with the force tick ON first, review the removals/downgrades, then apply.",
 		"msg.uploaded": "Uploaded revision {revision} ({packages} packages, {bytes} bytes).",
+		"msg.uploadPreserved": "Upload preserved {n} remote-only plugin(s): {list}",
+		"msg.uploadKeptLocal": "Kept {n} higher local version(s): {list}",
 		"msg.applied": "Applied remote manifest (snapshot {snapshot}).",
 		"msg.appliedNoop": "No differences; nothing changed.",
 		"msg.restored": "Rolled back to {snapshot}.",
@@ -241,6 +275,11 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 			automation: null,
 			settingsLoaded: false,
 			cred: { accessKeyId: "", secretAccessKey: "" },
+			// Deliberately NOT persisted (never in state.form, never in
+			// localStorage, never in settings.json): force actions are
+			// per-operation decisions that must be re-ticked every time.
+			forceUpload: false,
+			forceApply: false,
 		};
 
 		function setForm(patch) {
@@ -458,11 +497,21 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 					h("div", { style: { opacity: 0.7, fontSize: 12, marginTop: 6 } }, t("automation.hint")),
 				),
 
+				// force-overwrite switches — one-shot, never persisted
+				h("div", { style: { margin: "14px 0 6px", padding: "10px", borderRadius: 8, border: "1px solid var(--dsh-err, #c33)" + "" } },
+					h("div", { style: { fontWeight: 600, marginBottom: 6, color: "var(--dsh-err, #c33)" } }, t("force.title")),
+					h(Field, { label: t("force.upload") },
+						h("input", { type: "checkbox", checked: state.forceUpload === true, onChange: (e) => { state.forceUpload = e.target.checked; render(); } })),
+					h(Field, { label: t("force.apply") },
+						h("input", { type: "checkbox", checked: state.forceApply === true, onChange: (e) => { state.forceApply = e.target.checked; render(); } })),
+					h("div", { style: { opacity: 0.7, fontSize: 12, marginTop: 6 } }, t("force.hint")),
+				),
+
 				// actions
 				h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", margin: "14px 0 6px" } },
 					h("button", { style: btnStyle(), disabled: state.busy, onClick: doPreview }, t("btn.preview")),
-					h("button", { style: btnStyle("primary"), disabled: state.busy, onClick: doUpload }, t("btn.upload")),
-					h("button", { style: btnStyle("primary"), disabled: state.busy, onClick: doApply }, t("btn.apply")),
+					h("button", { style: btnStyle(state.forceUpload ? "danger" : "primary"), disabled: state.busy, onClick: doUpload }, t("btn.upload")),
+					h("button", { style: btnStyle(state.forceApply ? "danger" : "primary"), disabled: state.busy, onClick: doApply }, t("btn.apply")),
 					state.snapshots.length > 0
 						? h("button", { style: btnStyle("danger"), disabled: state.busy, onClick: doRollback }, t("btn.rollback") + " (" + state.snapshots[0].id.slice(0, 26) + "…)")
 						: null,
@@ -483,26 +532,53 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 
 		function planText(plan) {
 			if (plan.empty) return t("plan.empty");
+			const replace = plan.mode === "replace";
 			const lines = [];
 			for (const e of plan.installs ?? []) lines.push("+ " + e.name + "@" + e.version);
 			for (const e of plan.upgrades ?? []) lines.push("↑ " + e.name + " " + e.from + " → " + e.to);
-			for (const e of plan.downgrades ?? []) lines.push("↓ " + e.name + " " + e.from + " → " + e.to);
-			for (const e of plan.removals ?? []) lines.push("- " + e.name);
+			if (replace) {
+				for (const e of plan.downgrades ?? []) lines.push("↓ " + e.name + " " + e.from + " → " + e.to);
+				for (const e of plan.removals ?? []) lines.push("✗ " + e.name + " — " + t("plan.remove"));
+			} else {
+				for (const e of plan.keptLocal ?? []) lines.push("= " + e.name + " " + e.local + " (" + fmt(t, "plan.kept", { remote: e.remote }) + ")");
+				for (const e of plan.localOnly ?? []) lines.push("• " + e.name + "@" + e.version + " — " + t("plan.localOnly"));
+			}
 			if (plan.patchDiffers) lines.push("~ " + t("plan.patch"));
+			lines.push("");
+			lines.push(replace ? t("plan.replaceHint") : t("plan.mergeHint"));
 			return lines.join("\n");
 		}
 
 		async function doUpload() {
 			if (!formConfigured()) { setError("config", ""); render(); return; }
-			const data = await call("/dsh-plugin-list-sync/api/upload", { config: s3Payload() });
+			if (state.forceUpload && !window.confirm(t("confirm.forceUpload"))) {
+				setMessage(t("msg.forceCancelled"));
+				return;
+			}
+			const data = await call("/dsh-plugin-list-sync/api/upload", { config: s3Payload(), force: state.forceUpload === true });
+			// One-shot: whatever the outcome, the force tick resets so the next
+			// upload is a safe merge unless the user opts in again.
+			state.forceUpload = false;
+			render();
 			if (data === null) return;
-			setMessage(fmt(t, "msg.uploaded", { revision: data.revision, packages: data.packages, bytes: data.bytes }));
+			let message = fmt(t, "msg.uploaded", { revision: data.revision, packages: data.packages, bytes: data.bytes });
+			if (data.force === true) message = fmt(t, "msg.uploadedForce", { revision: data.revision, packages: data.packages, bytes: data.bytes });
+			if (Array.isArray(data.preservedRemotePackages) && data.preservedRemotePackages.length > 0) {
+				message += " " + fmt(t, "msg.uploadPreserved", { n: data.preservedRemotePackages.length, list: data.preservedRemotePackages.join(", ") });
+			}
+			if (Array.isArray(data.keptLocalVersions) && data.keptLocalVersions.length > 0) {
+				message += " " + fmt(t, "msg.uploadKeptLocal", { n: data.keptLocalVersions.length, list: data.keptLocalVersions.join(", ") });
+			}
+			if (Array.isArray(data.droppedRemotePackages) && data.droppedRemotePackages.length > 0) {
+				message += " " + fmt(t, "msg.uploadDropped", { n: data.droppedRemotePackages.length, list: data.droppedRemotePackages.join(", ") });
+			}
+			setMessage(message);
 			refreshStatus();
 		}
 
 		async function doPreview() {
 			if (!formConfigured()) { setError("config", ""); render(); return; }
-			const data = await call("/dsh-plugin-list-sync/api/preview", { config: s3Payload() });
+			const data = await call("/dsh-plugin-list-sync/api/preview", { config: s3Payload(), mode: state.forceApply === true ? "replace" : "merge" });
 			if (data === null) return;
 			state.plan = data.plan; render();
 			refreshStatus();
@@ -510,7 +586,31 @@ window.__ModuleLoader__.load({ id: "dsh-plugin-list-sync", factory: (require) =>
 
 		async function doApply() {
 			if (!formConfigured()) { setError("config", ""); render(); return; }
-			const data = await call("/dsh-plugin-list-sync/api/apply", { config: s3Payload() });
+			const replace = state.forceApply === true;
+			if (replace) {
+				// Guard 1: the currently displayed plan must be the replace plan.
+				if (state.plan?.mode !== "replace") {
+					setError("confirm-required", t("err.needReplacePreview"));
+					return;
+				}
+				// Guard 2: explicit confirmation spelling out the destructive parts.
+				const removals = (state.plan.removals ?? []).map((e) => e.name);
+				const downgrades = (state.plan.downgrades ?? []).map((e) => e.name + " " + e.from + " → " + e.to);
+				if (!window.confirm(fmt(t, "confirm.forceApply", {
+					removals: removals.length > 0 ? removals.join(", ") : t("confirm.none"),
+					downgrades: downgrades.length > 0 ? downgrades.join(", ") : t("confirm.none"),
+				}))) {
+					setMessage(t("msg.forceCancelled"));
+					return;
+				}
+			}
+			const payload = replace
+				? { config: s3Payload(), mode: "replace", confirmReplace: true }
+				: { config: s3Payload(), mode: "merge" };
+			const data = await call("/dsh-plugin-list-sync/api/apply", payload);
+			// One-shot: the force tick never survives an apply attempt.
+			state.forceApply = false;
+			render();
 			if (data === null) return;
 			state.plan = data.plan ?? state.plan;
 			setMessage(data.applied ? fmt(t, "msg.applied", { snapshot: data.snapshotId }) : t("msg.appliedNoop"));

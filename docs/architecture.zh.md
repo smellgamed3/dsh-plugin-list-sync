@@ -31,10 +31,10 @@
 | 模块 | 职责 |
 | --- | --- |
 | `lib/index.js` | Cordis Host 入口、HTTP 路由、命令接入、配置合并、上传/预览/应用编排。 |
-| `lib/manifest.js` | 读取 Profile、过滤官方 bundle、投影 patch、序列化与严格验证 manifest。 |
+| `lib/manifest.js` | 读取 Profile、过滤官方 bundle、投影 patch、序列化与严格验证 manifest、`mergeManifests` 合并原语与版本比较。 |
 | `lib/s3.js` | 无 SDK 的 AWS SigV4、Endpoint 标准化、GET/HEAD/PUT、错误分类。 |
-| `lib/diff.js` | 比较本地/远端 manifest，生成安装、升级、降级、移除和 patch 计划。 |
-| `lib/apply.js` | 快照、文件写回、回滚、通过 DSH pluginManager 安装或移除插件。 |
+| `lib/diff.js` | 比较本地/远端 manifest，生成合并计划（默认：新增、升级、保留本地版本、本地独有；replace 模式：额外给出移除与降级）。 |
+| `lib/apply.js` | 快照、合并式文件写回（默认不删本地依赖/不降级；replace 模式镜像远端但豁免官方组件）、回滚、pluginManager 编排（默认只装不卸；replace 才调用 removeBundle）。 |
 | `lib/credentials-store.js` | 本地保存、读取和清除 AccessKey / SecretKey。 |
 | `client/client.js` | 设置页、浏览器本地非敏感表单缓存、调用 Host API、差异和状态渲染。 |
 | `test/selftest.mjs` | manifest、diff、快照、回滚、凭据存储等核心回归。 |
@@ -75,17 +75,23 @@
 
 对协议做破坏性修改时必须提高 `version`，在解析层显式实现迁移，并保留旧版本读取策略或给出明确拒绝信息。
 
-## 上传流程
+## 上传流程（合并式）
 
 ```text
 GET object
-  ├─ 不存在：revision = 0
-  └─ 存在：严格验证 manifest，读取 revision + HEAD 的 ETag
+  ├─ 不存在：revision = 0，首次上传
+  ├─ 存在且合法：严格验证 manifest，读取 revision + HEAD 的 ETag
+  └─ 存在但损坏：拒绝覆盖（不静默丢弃未知内容）
 
 buildManifest(profile, revision + 1)
   ├─ 过滤官方 bundle / 本插件自身
   ├─ 默认剥离 LLM provider 详细 config
   └─ 生成稳定 JSON
+
+mergeManifests(local, remote)
+  ├─ packages：并集；共同包取更高版本（绝不降级、绝不丢弃任一侧）
+  ├─ bundles：并集（远端顺序在前，本地独有追加）
+  └─ patch：按 id 并集；共享行同步 disabled，config 保留本地
 
 PUT object
   ├─ AWS SigV4
@@ -93,30 +99,53 @@ PUT object
   └─ 可选 x-amz-server-side-encryption: AES256
 ```
 
-## 下载与应用流程
+上传是"本地合并进远端"：仅存在于远端的插件被保留（本机未安装不会从远端删除它们），共同插件取两端更高版本。上传结果报告 `preservedRemotePackages` 与 `keptLocalVersions`。
+
+## 下载与应用流程（合并式）
 
 ```text
 GET object
   ↓
 validateManifestBytes
   ↓
-build local manifest + diffManifests
+build local manifest + diffManifests（合并计划：只有新增与升级）
   ↓
 用户预览并确认
   ↓
 createSnapshot
   ↓
-writeProfileFiles
+writeProfileFiles（合并写入）
+  ├─ package.json：本地依赖全保留；远端新增追加；共同包仅升级
+  ├─ bundles：并集（本地顺序在前）
+  └─ cordis.patch.yml：本地行含 config 原样保留；disabled 随远端；远端独有行追加
   ↓
-pluginManager.installBundle / removeBundle
+pluginManager.installBundle（只安装与升级，绝不 removeBundle）
   ↓
 成功：报告结果
 失败：保留快照，允许 rollback
 ```
 
+**合并不变量**（违反任何一条都是缺陷）：
+
+1. 下载应用绝不移除本地已安装的第三方插件（默认 merge 模式）。
+2. 下载应用绝不把共同插件降到更低的版本（默认 merge 模式）。
+3. 上传绝不从远端清单中删除仅远端存在的插件（默认 merge 模式）。
+4. 本地 `cordis.patch.yml` 行的嵌套 `config:` 块永远不会被同步改写（**任何模式**，包括 replace）。
+
+### 强制覆盖（replace 模式，显式一次性选择）
+
+`diffManifests(local, remote, { mode: 'replace' })` 与 `writeProfileFiles(..., { mode: 'replace' })` 提供镜像语义：本地独有第三方包成为 `removals`、更旧的远端版本成为 `downgrades`、`removeBundle` 会被调用。它的安全边界：
+
+- **传输层防护**：`/api/apply` 收到 `mode: 'replace'` 时必须同时携带 `confirmReplace: true`，否则以 `confirm-required` 拒绝——客户端必须先展示 replace 计划再确认。
+- **不持久化**：force 开关只存在于客户端 `state.forceUpload` / `state.forceApply`（不在 `state.form`，不进 localStorage/settings.json），每次操作后复位。
+- **客户端双重确认**：强制覆盖本地要求 (a) 以勾选状态重新预览得到 `plan.mode === 'replace'`，(b) 通过列明具体 removals/downgrades 的 `window.confirm`。
+- **命令面拒绝**：`pull --force` 直接拒绝；强制覆盖本地只能走设置页。
+- **官方组件豁免**：即使 replace，`@deepseek-ai/*` 与本插件自身的依赖、bundle、patch 行（含 provider config）原样保留。
+- **快照仍然先行**：replace 应用前同样 `createSnapshot`。
+
 ### Patch 合成原则
 
-默认同步结构化 patch 行，但保留本地官方 DSH 条目的原始块。例如 `llm-pi-ai`、`agent-default-model` 等官方条目的嵌套 `config:` 文本必须原样保留，不能将其扁平化或重序列化，否则可能损坏本地模型配置。
+补丁行按 `id` 做块级合并：本地行总是以其原始文本保留——包括 `llm-pi-ai`、`agent-default-model` 等官方条目的嵌套 `config:`（LLM provider 定义、模型目录），绝不被扁平化或重序列化。共享行只有 `disabled` 开关随远端同步；远端独有行从 manifest 追加渲染。
 
 用户启用“同步 LLM provider 配置”后，manifest 可携带完整 patch 文本；此模式要求远端配置受信且所有目标机器使用相同的环境拓扑。
 
@@ -203,9 +232,9 @@ Host 同时兼容历史扁平字段，避免旧缓存页面与新 Host 短暂不
 
 | 变更区域 | 至少需要验证 |
 | --- | --- |
-| `manifest.js` | 默认/完整 patch、非法 manifest、大小上限、包名过滤。 |
-| `diff.js` | 安装、升级、降级、移除、键顺序不影响 diff。 |
-| `apply.js` | 快照、回滚、官方 provider 块保留。 |
+| `manifest.js` | 默认/完整 patch、非法 manifest、大小上限、包名过滤、`mergeManifests` 并集与高版本胜出。 |
+| `diff.js` | 安装、升级、保留本地版本（不降级）、本地独有（不移除）、键顺序不影响 diff；replace 模式的 removals/downgrades。 |
+| `apply.js` | 快照、回滚、合并写回不删本地依赖、官方 provider 块保留。 |
 | `s3.js` | Path-Style、虚拟主机、SigV4、错误分类、SSE 默认行为。 |
 | `credentials-store.js` | 保存、掩码、清除、env fallback、换行/空值拒绝。 |
 | `client/client.js` | 表单 payload、loading 状态清除、敏感字段不进入 localStorage。 |
@@ -228,4 +257,4 @@ pnpm run test:e2e       # mock 启动后
 4. 为 S3 兼容端点维护认证/寻址互操作测试矩阵。
 5. 发布 npm 包及签名发行物，降低 GitHub 安装路径的供应链风险。
 
-任何新增功能都应保持：**预览先于写入、快照先于应用、凭据永不上传、官方 bundle 不跨机覆盖**。
+任何新增功能都应保持：**预览先于写入、快照先于应用、凭据永不上传、官方 bundle 不跨机覆盖、默认合并永不删除本地插件或降低本地版本、破坏性替换必须显式一次性选择并确认**。

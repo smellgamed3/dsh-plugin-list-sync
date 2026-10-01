@@ -21,3 +21,6 @@ Thumbs.db
 coverage/
 dist/
 lib/**/*.map
+
+# Windows file-permission repair artifacts (session-local)
+.acl-recovery/

@@ -15,6 +15,10 @@ The plugin-list configuration is exactly two files in a DSH profile:
 | `package.json` | third-party dependency versions + `dsh.profile.bundles` enable order |
 | `cordis.patch.yml` | the user patch layer — disabled rows, plugin config overrides |
 
+**Both directions are MERGE-only by default.** Uploading never deletes remote-only plugins; downloading never removes a locally installed plugin and never downgrades a locally higher version (per-package the HIGHER side wins; an older remote revision is reported as *kept-local*, never applied).
+
+Force overwrite exists as an **explicit, one-shot, never-persisted opt-in**: two red-bordered checkboxes in the settings page ("force overwrite remote" on upload / "force overwrite local" on apply). They are stored nowhere (not in localStorage, not in settings.json), reset automatically after every operation, and force-local additionally requires re-previewing the replace plan and passing a confirmation dialog that spells out the exact removals/downgrades. See the operations section in the Chinese README.
+
 - Official `@deepseek-ai/*` bundles are **never synced**: they track each client's own DSH runtime, and syncing them would re-create the peer-dependency breakages the DSH plugin gate exists to prevent.
 - **LLM provider config is excluded by default** (the `config:` blocks of rows like `llm-pi-ai` / `agent-default-model` carry baseURLs and model catalogs). Enable `includePatchConfig` if you want it synced; when disabled, those rows keep only their structural keys (`id` / `name` / `disabled`).
 - `dsh-plugin-list-sync` itself is skipped (self-bootstrap): it must be installed on each client manually — once.
@@ -70,12 +74,13 @@ Non-secret automation settings live in `<profile>/.dsh-plugin-list-sync/settings
 
 ## Safety model
 
-1. **Download-side strict validation** — a remote manifest is applied only after schema whitelisting (format/version/revision, npm-style package names, bounded sizes). Anything outside the schema refuses to apply.
-2. **Snapshot-first apply** — `package.json` + `cordis.patch.yml` are captured to `.dsh-plugin-list-sync/snapshots/` before any write; rollback is one command and itself snapshots first.
-3. **Revision monotonicity** — uploads increment the remote revision; a pull never applies an older revision silently.
-4. **Same-origin fence** — every mutating route rejects cross-site requests (Origin/Host discipline).
-5. **Optimistic locking** — uploads carry `If-Match` with the observed ETag where the server supports it.
-6. **Minimal peer surface** — the only peer dependency is `@deepseek-ai/cordis` (ships with DSH). Everything else (`commands`, `webServer`, `pluginManager`, `credentials`, `settings`) is feature-detected at runtime; a host missing a service keeps that surface disabled instead of failing to load.
+1. **Merge-only by default** — upload merges local INTO the remote manifest (remote-only plugins are preserved); apply merges remote INTO the local profile (local-only plugins survive, local versions never move backwards). Force-replace requires an explicit, per-operation, never-persisted opt-in with confirmation.
+2. **Download-side strict validation** — a remote manifest is applied only after schema whitelisting (format/version/revision, npm-style package names, bounded sizes). Anything outside the schema refuses to apply; a corrupt remote object also refuses to be overwritten by an upload (unless force is deliberately ticked).
+3. **Snapshot-first apply** — `package.json` + `cordis.patch.yml` are captured to `.dsh-plugin-list-sync/snapshots/` before any write; rollback is one command and itself snapshots first.
+4. **Revision monotonicity** — uploads increment the remote revision; a pull never applies an older revision silently.
+5. **Same-origin fence** — every mutating route rejects cross-site requests (Origin/Host discipline).
+6. **Optimistic locking** — uploads carry `If-Match` with the observed ETag where the server supports it.
+7. **Minimal peer surface** — the only peer dependency is `@deepseek-ai/cordis` (ships with DSH). Everything else (`commands`, `webServer`, `pluginManager`, `credentials`, `settings`) is feature-detected at runtime; a host missing a service keeps that surface disabled instead of failing to load.
 
 ## Manifest format
 

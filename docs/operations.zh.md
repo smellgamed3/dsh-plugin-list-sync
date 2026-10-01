@@ -93,7 +93,7 @@ SSE-S3 requires RUSTFS_SSE_S3_MASTER_KEY to be set ...
 2. 在该设备设置 endpoint、bucket、prefix、凭据。
 3. 点击“上传当前插件列表”。
 4. 在另一台测试客户端设置相同连接信息。
-5. 先点击“预览差异”，检查计划中没有意外移除或跨版本降级。
+5. 先点击“预览差异”，检查计划中没有意外的版本回退（合并语义保证不会移除本地插件或降级）。
 6. 点击“下载并应用”。
 7. 重启 DSH，确认所有 Host/Client bundle 正常加载。
 8. 验证后再向其他设备推广。
@@ -166,7 +166,7 @@ AWS IAM 概念示例：
 - 同一个 profile 名
 - 相同的 `includePatchConfig` 选择
 
-同时确认不是另一个客户端刚覆盖了对象。manifest 中 `source.label`、`updatedAt` 和 `revision` 可帮助定位来源。
+同时确认不是另一个客户端刚覆盖了对象。注意本插件的上传是**合并式**的：远端独有插件会被保留，共同插件取更高版本。manifest 中 `source.label`、`updatedAt` 和 `revision` 可帮助定位来源。
 
 ### 6. 应用后插件加载失败
 

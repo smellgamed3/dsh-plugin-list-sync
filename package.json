@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-list-sync",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Synchronize DeepSeek Harness plugin-list profiles through S3-compatible storage (AWS S3, MinIO, RustFS, R2, OSS). · 面向多端 DSH 的 S3 插件列表同步与安全回滚插件。",
   "author": "smellgamed3",
   "type": "module",
